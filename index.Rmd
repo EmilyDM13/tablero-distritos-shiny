@@ -1,0 +1,141 @@
+---
+title: "Datos de distritos de Costa Rica con Shiny"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+```
+
+```{r paquetes, message=FALSE,warning=FALSE}
+library(dplyr)
+library(sf)
+library(leaflet)
+library(DT)
+library(ggplot2)
+library(plotly)
+library(shiny)
+```
+
+```{r lectura-datos,message=FALSE,warning=FALSE}
+distritos <-
+  st_read(dsn = "distritos_simplificados.geojson", quiet = TRUE) %>%
+  st_transform(4326)
+```
+
+```{r lista-provincias}
+lista_distritos <- unique(distritos$provincia)
+lista_distritos <- sort(lista_distritos)
+lista_distritos <- c("Todos", lista_distritos)
+```
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r filtro}
+selectInput(
+  inputId = "provincia",
+  label = "Provincia",
+  choices = lista_distritos,
+  selected = "Todos"
+)
+
+filtrarDistritos <- reactive({
+  # Valor inicial del objeto que va a retornarse
+  distritos_filtrados <- distritos
+  
+  # Filtrado de cantones por provincia
+  if (input$provincia != "Todas") {
+    distritos_filtrados <-
+      distritos_filtrados %>%
+      filter(provincia == input$provincia)
+  }
+  
+  return(distritos_filtrados)
+})
+```
+
+Row {data-height=10}
+-----------------------------------------------------------------------
+
+### **Fuente de los datos: [Instituto Geográfico Nacional (IGN)](http://geos.snitcr.go.cr/be/IGN_5/wfs)**
+
+Row {data-height=590}
+-----------------------------------------------------------------------
+
+### Mapa de cantones 
+
+```{r mapa, message=FALSE,warning=FALSE}
+# Mapa
+renderLeaflet({
+  distritos <- filtrarDistritos()
+  
+  leaflet() %>%
+    setView(lng = -84.19452,
+            lat = 9.572735,
+            zoom = 7) %>%
+    addTiles(group = "OpenStreetMap") %>%
+    addPolygons(
+      data = distritos,
+      color = "black",
+      opacity = 0.2,
+      weight = 1.5,
+      popup = paste(
+        paste("<a>Distrito:</a>", distritos$distrito),
+        paste("<a>Área:</a>", distritos$area, "km2"),
+        sep = "<br>"
+      ),
+      group = "Distritos"
+    ) %>%
+    addLayersControl(baseGroups = c("OpenStreetMap"),
+                     overlayGroups = c("Distritos"))
+})
+```
+
+Row {data-width=450}
+-----------------------------------------------------------------------
+
+### Tabla de cantones
+
+```{r tabla, message=FALSE,warning=FALSE}
+renderDT({
+  distritos <- filtrarDistritos()
+  
+  distritos %>%
+    st_drop_geometry() %>%
+    select(provincia, distrito, area) %>%
+    arrange(desc(area)) %>%
+    datatable(
+      colnames = c("Provincia", "Distrito", "Área"),
+      options = list(
+        pageLength = 5,
+        language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+      )
+    )
+})
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+
+### Gráfico de cantones
+
+```{r grafico, message=FALSE,warning=FALSE}
+renderPlotly({
+  distritos <- filtrarDistritos()
+  
+  grafico_ggplot2 <-
+    distritos %>%
+    st_drop_geometry() %>%
+    slice_max(area, n = 20) %>%
+    ggplot(aes(x = reorder(distrito,-area), y = area)) +
+    geom_bar(stat = "identity") +
+    xlab("Cantón") +
+    ylab("Área (km2)")
+  
+  ggplotly(grafico_ggplot2)
+})
+```
